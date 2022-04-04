@@ -54,7 +54,9 @@ module Cardano.Wallet.Shelley.Transaction
     , mkUnsignedTx
     , txConstraints
     , costOfIncreasingCoin
+    , _distributeSurplus
     , sizeOfCoin
+    , maximumCostOfIncreasingCoin
     ) where
 
 import Prelude
@@ -179,6 +181,7 @@ import Cardano.Wallet.Transaction
     , TokenMapWithScripts
     , TransactionCtx (..)
     , TransactionLayer (..)
+    , TxFeeAndChange (..)
     , TxFeeUpdate (..)
     , TxUpdate (..)
     , withdrawalToCoin
@@ -615,6 +618,9 @@ newTransactionLayer networkId = TransactionLayer
 
     , maxScriptExecutionCost =
         _maxScriptExecutionCost
+
+
+    , distributeSurplus = _distributeSurplus
 
     , assignScriptRedeemers =
         _assignScriptRedeemers
@@ -1462,6 +1468,13 @@ costOfIncreasingCoin (LinearFee fee) from delta =
     perByte = ceiling $ slope fee
     costOfCoin = Coin . (perByte *) . unTxSize . sizeOfCoin
 
+-- The maximum cost increase 'costOfIncreasingCoin' can return, which is the
+-- cost of 8 bytes.
+maximumCostOfIncreasingCoin :: FeePolicy -> Coin
+maximumCostOfIncreasingCoin (LinearFee fee) = Coin $ 8 * perByte
+  where
+    perByte = round $ slope fee
+
 -- | Calculate the size of a coin when encoded as CBOR.
 sizeOfCoin :: Coin -> TxSize
 sizeOfCoin (Coin c)
@@ -1470,6 +1483,81 @@ sizeOfCoin (Coin c)
     | c >=           256 = TxSize 3
     | c >=            24 = TxSize 2
     | otherwise          = TxSize 1
+
+
+-- NOTE: Now returns a delta:
+--
+--
+-- >>> _distributeSurplus p (Coin 100) (TxFeeAndChange (Coin 200) (Coin 200))
+-- TxFeeAndChange
+--    { fee = Coin 1
+--    , change = Coin 99
+--    }
+--
+-- >>> _distributeSurplus p (Coin 100) (TxFeeAndChange (Coin 255) (Coin 200))
+-- TxFeeAndChange
+--    { fee = Coin 2
+--    , change = Coin 98
+--    }
+--
+_distributeSurplus
+    :: FeePolicy
+    -> Coin -- ^ Surplus to distribute
+    -> TxFeeAndChange
+    -> Either Coin TxFeeAndChange
+_distributeSurplus feePolicy surplus fc@(TxFeeAndChange fee0 Nothing) =
+    burnSurplusAsFees feePolicy surplus fc
+_distributeSurplus feePolicy surplus fc@(TxFeeAndChange fee0 (Just change0)) =
+    let
+        -- We calculate the maximum possible fee increase, by assuming the
+        -- **entire** surplus is added to the change.
+        extraFee = findFixpointIncreasingFeeBy $
+            costOfIncreasingCoin feePolicy change0 surplus
+
+    in
+        case surplus `Coin.subtract` extraFee of
+            Just extraChange ->
+                Right $ TxFeeAndChange
+                    { fee = extraFee
+                    , change = Just extraChange
+                    }
+            Nothing -> burnSurplusAsFees feePolicy surplus fc
+  where
+    -- Increasing the fee may itself increase the fee. If that is the case, this
+    -- function will increase the fee further. The process repeats until the fee
+    -- doesn't need to be increased.
+    --
+    -- The function will always converge because the result of
+    -- 'costOfIncreasingCoin' is bounded to @8 * feePerByte@.
+    --
+    -- On mainnet it seems unlikely that the function would recurse more than
+    -- one time, and certainly not more than twice. If the protocol parameters
+    -- are updated to allow for slightly more expensive txs, it might be
+    -- possible to hit the boundary at ≈4 ada where the fee would need 9 bytes
+    -- rather than 5. This is already the largest boundary.
+    --
+    -- Note that both the argument and the result of this function are increases
+    -- relative to 'fee0'.
+    findFixpointIncreasingFeeBy = go mempty
+      where
+        go :: Coin -> Coin -> Coin
+        go c (Coin 0) = c
+        go c increase = go
+            (c <> increase)
+            (costOfIncreasingCoin feePolicy (c <> fee0) increase)
+
+burnSurplusAsFees
+    :: FeePolicy
+    -> Coin -- Surplus
+    -> TxFeeAndChange
+    -> Either Coin TxFeeAndChange
+burnSurplusAsFees feePolicy surplus (TxFeeAndChange fee0 _)
+    | costOfIncreasingCoin feePolicy fee0 surplus > surplus = Left $ costOfIncreasingCoin feePolicy fee0 surplus
+    | otherwise =
+        -- The fee of increasing the change is bigger than the surplus
+        -- itself (suggesting the surplus is tiny). Hence we burn the
+        -- surplus as fees.
+        Right $ TxFeeAndChange surplus Nothing
 
 -- | Estimates the final size of a transaction based on its skeleton.
 --

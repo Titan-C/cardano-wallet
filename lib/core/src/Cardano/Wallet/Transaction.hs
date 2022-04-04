@@ -29,6 +29,7 @@ module Cardano.Wallet.Transaction
     , TxFeeUpdate(..)
     , TokenMapWithScripts (..)
     , emptyTokenMapWithScripts
+    , TxFeeAndChange (..)
 
     -- * Errors
     , ErrSignTx (..)
@@ -62,6 +63,7 @@ import Cardano.Wallet.Primitive.Slotting
     ( PastHorizonException, TimeInterpreter )
 import Cardano.Wallet.Primitive.Types
     ( Certificate
+    , FeePolicy
     , PoolId
     , ProtocolParameters
     , SlotNo (..)
@@ -235,6 +237,12 @@ data TransactionLayer k tx = TransactionLayer
         -- boundary will soon hopefully go away, however)
         --
         -- Returns `Nothing` for ByronEra transactions.
+
+    , distributeSurplus
+        :: FeePolicy
+        -> Coin -- Surplus to distribute
+        -> TxFeeAndChange
+        -> Either Coin TxFeeAndChange
 
     , computeSelectionLimit
         :: ProtocolParameters
@@ -422,3 +430,13 @@ data ErrUpdateSealedTx
     -- key-witnesses would have been rendered invalid.
     | ErrByronTxNotSupported
     deriving (Generic, Eq, Show)
+
+-- Fee minimization
+
+
+data TxFeeAndChange = TxFeeAndChange
+    { fee :: Coin
+    , change :: Maybe Coin
+    } deriving (Show, Eq)
+
+
