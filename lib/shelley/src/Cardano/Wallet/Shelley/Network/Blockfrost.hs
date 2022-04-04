@@ -418,7 +418,7 @@ instance FromBlockfrost BF.Epoch EpochNo where
 {- Epoch-to-Era translation is not available in the Blockfrost API.
 
 For the Mainnet we're hardcoding the following history
-in order to work around this limiation:
+in order to work around this limitation:
 
 ┌───────┬───────┬─────────┐
 │ Epoch │ Major │   Era   │
