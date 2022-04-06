@@ -440,9 +440,9 @@ in order to work around this limitation:
 ├───────┼───────┼─────────┤
 │  235  │   2   │ Shelley │
 │  ...  │   2   │ Shelley │
-│  202  │   2   │ Shelley │
+│  208  │   2   │ Shelley │
 ├───────┼───────┼─────────┤
-│  201  │   1   │  Byron  │
+│  207  │   1   │  Byron  │
 │  ...  │   1   │  Byron  │
 └───────┴───────┴─────────┘
 -}
@@ -467,7 +467,7 @@ eraBoundaries = [minBound .. maxBound] <&> \era -> (era, epochEraStartsAt era)
         Node.AnyCardanoEra Node.AlonzoEra  -> 290
         Node.AnyCardanoEra Node.MaryEra    -> 251
         Node.AnyCardanoEra Node.AllegraEra -> 236
-        Node.AnyCardanoEra Node.ShelleyEra -> 202
+        Node.AnyCardanoEra Node.ShelleyEra -> 208
         Node.AnyCardanoEra Node.ByronEra   -> 0
 
 -- | Raises an error in case of an absent value
