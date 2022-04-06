@@ -67,8 +67,8 @@ import Cardano.Ledger.ShelleyMA.Timelocks
 import Cardano.Mnemonic
     ( SomeMnemonic (SomeMnemonic), entropyToMnemonic, mkEntropy )
 import Cardano.Wallet
-    ( BalanceTxNotSupportedReason (..)
-    , ErrBalanceTx (..)
+    ( ErrBalanceTx (..)
+    , ErrBalanceTxInternalError (..)
     , ErrSelectAssets (..)
     , ErrUpdateSealedTx (..)
     , FeeEstimation (..)
@@ -2924,19 +2924,19 @@ prop_balanceTransactionValid wallet (ShowBuildable partialTx') seed
                 label "outputs below minCoinValue" $ property True
             Left (ErrBalanceTxExistingCollateral) ->
                 label "existing collateral" True
-            Left (ErrBalanceTxNotYetSupported ZeroAdaOutput) ->
+            Left ErrBalanceTxZeroAdaOutput ->
                 label "not yet supported: zero ada output" $ property True
             Left ErrBalanceTxMaxSizeLimitExceeded ->
                 label "maxTxSize limit exceeded" $ property True
-            Left (ErrBalanceTxNotYetSupported ConflictingNetworks) ->
-                label "not yet supported: conflicting networks" $ property True
+            Left ErrBalanceTxConflictingNetworks ->
+                label "conflicting networks" $ property True
             Left
                 (ErrBalanceTxSelectAssets
                 (ErrSelectAssetsSelectionError
                 (SelectionBalanceErrorOf EmptyUTxO))) ->
                 label "empty UTxO" $ property True
-            Left (ErrBalanceTxNotYetSupported
-                 (UnderestimatedFee delta candidateTx)) ->
+            Left (ErrBalanceTxInternalError
+                 (ErrUnderestimatedFee delta candidateTx)) ->
                 let counterexampleText = mconcat
                         [ "underestimated fee by "
                         , pretty delta

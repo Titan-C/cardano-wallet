@@ -133,7 +133,7 @@ module Cardano.Wallet
     , ErrConstructTx (..)
     , ErrMintBurnAssets (..)
     , ErrBalanceTx (..)
-    , BalanceTxNotSupportedReason (..)
+    , ErrBalanceTxInternalError (..)
     , ErrUpdateSealedTx (..)
     , ErrCannotJoin (..)
     , ErrCannotQuit (..)
@@ -1697,8 +1697,8 @@ balanceTransactionWithSelectionStrategy
             | c >= 0 ->
                 pure $ Coin.unsafeFromIntegral c
             | otherwise ->
-                throwE . ErrBalanceTxNotYetSupported $
-                UnderestimatedFee (Coin.unsafeFromIntegral (-c)) candidateTx
+                throwE . ErrBalanceTxInternalError $
+                ErrUnderestimatedFee (Coin.unsafeFromIntegral (-c)) candidateTx
 
     let feeAndChange = TxFeeAndChange
             (unsafeFromLovelace candidateMinFee)
@@ -1707,7 +1707,7 @@ balanceTransactionWithSelectionStrategy
 
     TxFeeAndChange extraFee extraChange <-
          withExceptT
-            (ErrBalanceTxNotYetSupported . flip UnderestimatedFee candidateTx)
+            (ErrBalanceTxInternalError . flip ErrUnderestimatedFee candidateTx)
             (ExceptT . pure $
                 guardReasonableExcessFee
                     <$> distributeSurplus tl feePolicy surplus feeAndChange)
@@ -1743,7 +1743,7 @@ balanceTransactionWithSelectionStrategy
         bal <- txBalance tx
         if bal == mempty
         then pure tx
-        else throwE $ ErrBalanceTxFailedBalancing bal
+        else throwE $ ErrBalanceTxInternalError $ ErrFailedBalancing bal
 
     txBalance :: SealedTx -> ExceptT ErrBalanceTx m Cardano.Value
     txBalance tx =
@@ -1836,7 +1836,7 @@ balanceTransactionWithSelectionStrategy
                 filter (\o -> view (#tokens . #coin) o == Coin 0 ) outputs
 
         unless (null zeroAdaOutputs) $
-            throwE $ ErrBalanceTxNotYetSupported ZeroAdaOutput
+            throwE ErrBalanceTxZeroAdaOutput
 
     extractOutputsFromTx tx =
         let (Tx {outputs}, _, _, _) = decodeTx tl tx
@@ -1862,7 +1862,7 @@ balanceTransactionWithSelectionStrategy
                 Cardano.TxWithdrawals _ wdrls -> Set.size
                     (Set.fromList $ map networkOfWdrl wdrls) > 1
         when conflictingWdrlNetworks $
-            throwE $ ErrBalanceTxNotYetSupported ConflictingNetworks
+            throwE ErrBalanceTxConflictingNetworks
 
     guardExistingCollateral (cardanoTx ->
         (Cardano.InAnyCardanoEra _ (Cardano.Tx (Cardano.TxBody body) _))) = do
@@ -3466,16 +3466,15 @@ data ErrBalanceTx
     | ErrBalanceTxSelectAssets ErrSelectAssets
     | ErrBalanceTxMaxSizeLimitExceeded
     | ErrBalanceTxExistingCollateral
+    | ErrBalanceTxConflictingNetworks
     | ErrBalanceTxAssignRedeemers ErrAssignRedeemers
-    | ErrBalanceTxNotYetSupported BalanceTxNotSupportedReason
-    | ErrBalanceTxFailedBalancing Cardano.Value
+    | ErrBalanceTxInternalError ErrBalanceTxInternalError
+    | ErrBalanceTxZeroAdaOutput
     deriving (Show, Eq)
 
--- TODO: Remove once problems are fixed.
-data BalanceTxNotSupportedReason
-    = UnderestimatedFee Coin SealedTx
-    | ZeroAdaOutput
-    | ConflictingNetworks
+data ErrBalanceTxInternalError
+    = ErrUnderestimatedFee Coin SealedTx
+    | ErrFailedBalancing Cardano.Value
     deriving (Show, Eq)
 
 -- | Errors that can occur when submitting a transaction.
