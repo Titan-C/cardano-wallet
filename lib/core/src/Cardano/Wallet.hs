@@ -9,7 +9,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -436,6 +435,7 @@ import Cardano.Wallet.Primitive.Types.Tx
     , fromTransactionInfo
     , txOutAddCoin
     , txOutCoin
+    , txOutputMinimumAdaQuantity
     , withdrawals
     )
 import Cardano.Wallet.Primitive.Types.UTxO
@@ -1706,9 +1706,11 @@ balanceTransactionWithSelectionStrategy
     let feePolicy = view (#txParameters . #getFeePolicy) pp
 
     TxFeeAndChange extraFee extraChange <-
-        withExceptT
-            (ErrBalanceTxNotYetSupported . flip UnderestimatedFee candidateTx) $
-            ExceptT $ pure $ distributeSurplus tl feePolicy surplus feeAndChange
+         withExceptT
+            (ErrBalanceTxNotYetSupported . flip UnderestimatedFee candidateTx)
+            (ExceptT . pure $
+                guardReasonableExcessFee
+                    <$> distributeSurplus tl feePolicy surplus feeAndChange)
 
     guardTxSize =<< guardTxBalanced =<< (assembleTransaction $ TxUpdate
         { extraInputs
@@ -1785,6 +1787,30 @@ balanceTransactionWithSelectionStrategy
             <|>
             (\(_,o) -> (o, Nothing))
                 <$> L.find (\(i',_) -> i == i') (extraInputs update)
+
+
+    -- Increasing the fee by much should only happen if coin-selection is unable
+    -- to construct a change output respecting the minUTxOValue.
+    guardReasonableExcessFee
+        :: TxFeeAndChange
+        -> TxFeeAndChange
+    guardReasonableExcessFee fc@(TxFeeAndChange feeToBurn _)
+        | feeToBurn > minAda <> minAda =
+            -- We let 2*minAda be the limit rather than just minAda to account
+            -- for overestimations in coin-selection etc. Precision doesn't
+            -- matter here.
+            error $ unwords
+                [ "final redundant safety check in balanceTransaction:"
+                , "burning more than 2 * minUTxOValue in fees is unreasonable"
+                ]
+        | otherwise = fc
+
+      where
+        -- NOTE: The change output we've failed to create would only have
+        -- contained ada, so passing 'TokenMap.empty' should be reasonable.
+        minAda = txOutputMinimumAdaQuantity
+            (view #constraints tl pp)
+            TokenMap.empty
 
     guardZeroAdaOutputs outputs = do
         -- We seem to produce imbalanced transactions if zero-ada
