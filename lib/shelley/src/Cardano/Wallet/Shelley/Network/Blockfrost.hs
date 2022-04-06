@@ -36,9 +36,7 @@ import Prelude
 import qualified Blockfrost.Client as BF
 import qualified Cardano.Api.Shelley as Node
 import qualified Data.Sequence as Seq
-import qualified Ouroboros.Consensus.HardFork.History.EraParams as HF
 import qualified Ouroboros.Consensus.HardFork.History.Qry as HF
-import qualified Ouroboros.Consensus.HardFork.History.Summary as HF
 
 import Cardano.Api
     ( AnyCardanoEra, NetworkId (Mainnet, Testnet) )
@@ -118,8 +116,24 @@ import Data.Traversable
     ( for )
 import Fmt
     ( pretty )
+import Ouroboros.Consensus.Block.Abstract
+    ( EpochSize (EpochSize) )
+import Ouroboros.Consensus.BlockchainTime.WallClock.Types
+    ( RelativeTime (..), mkSlotLength )
 import Ouroboros.Consensus.Cardano.Block
-    ( CardanoBlock, StandardCrypto )
+    ( CardanoBlock, CardanoEras, StandardCrypto )
+import Ouroboros.Consensus.HardFork.History.EraParams
+    ( EraParams (EraParams, eraEpochSize, eraSafeZone, eraSlotLength)
+    , SafeZone (..)
+    )
+import Ouroboros.Consensus.HardFork.History.Summary
+    ( Bound (Bound, boundEpoch, boundSlot, boundTime)
+    , EraEnd (EraEnd, EraUnbounded)
+    , EraSummary (EraSummary, eraEnd, eraParams, eraStart)
+    , Summary (..)
+    )
+import Ouroboros.Consensus.Util.Counting
+    ( NonEmpty (NonEmptyCons, NonEmptyOne) )
 import UnliftIO
     ( throwIO )
 import UnliftIO.Async
@@ -213,9 +227,8 @@ withNetworkLayer tr net project np k = k NetworkLayer
     timeInterpreter ::
         StartTime -> TimeInterpreter (ExceptT PastHorizonException IO)
     timeInterpreter startTime =
-        mkTimeInterpreter (MsgTimeInterpreterLog >$< tr) startTime $ do
-            let summary = undefined -- TODO
-            pure $ HF.mkInterpreter summary
+        mkTimeInterpreter (MsgTimeInterpreterLog >$< tr) startTime $
+            pure $ HF.mkInterpreter $ networkSummary net
 
     handleBlockfrostError :: ExceptT BlockfrostError IO a -> IO a
     handleBlockfrostError =
@@ -414,6 +427,103 @@ instance FromBlockfrost BF.Slot SlotNo where
 instance FromBlockfrost BF.Epoch EpochNo where
     fromBlockfrost = pure . fromIntegral
 
+
+networkSummary :: NetworkId -> Summary (CardanoEras StandardCrypto)
+networkSummary = \case
+    Mainnet ->
+        Summary
+            { getSummary =
+            -- Byron
+            NonEmptyCons EraSummary
+                { eraStart = Bound
+                    { boundTime = RelativeTime 0
+                    , boundSlot = 0
+                    , boundEpoch = 0
+                    }
+                , eraEnd = EraEnd Bound
+                    { boundTime = RelativeTime 89856000
+                    , boundSlot = 4492800
+                    , boundEpoch = Node.EpochNo 208
+                    }
+                , eraParams = EraParams
+                    { eraEpochSize = EpochSize 21600
+                    , eraSlotLength = mkSlotLength 20
+                    , eraSafeZone = StandardSafeZone 4320
+                    }
+                }
+            -- Shelley
+            $ NonEmptyCons EraSummary
+                { eraStart = Bound
+                    { boundTime = RelativeTime 89856000
+                    , boundSlot = 4492800
+                    , boundEpoch = Node.EpochNo 208
+                    }
+                , eraEnd = EraEnd Bound
+                    { boundTime = RelativeTime 101952000
+                    , boundSlot = 16588800
+                    , boundEpoch = Node.EpochNo 236
+                    }
+                , eraParams = EraParams
+                    { eraEpochSize = EpochSize 432000
+                    , eraSlotLength = mkSlotLength 1
+                    , eraSafeZone = StandardSafeZone 129600
+                    }
+                }
+            -- Allegra
+            $ NonEmptyCons EraSummary
+                { eraStart = Bound
+                    { boundTime = RelativeTime 101952000
+                    , boundSlot = 16588800
+                    , boundEpoch = Node.EpochNo 236
+                    }
+                , eraEnd = EraEnd Bound
+                    { boundTime = RelativeTime 108432000
+                    , boundSlot = 23068800
+                    , boundEpoch = Node.EpochNo 251
+                    }
+                , eraParams = EraParams
+                    { eraEpochSize = EpochSize 432000
+                    , eraSlotLength = mkSlotLength 1
+                    , eraSafeZone = StandardSafeZone 129600
+                    }
+                }
+            -- Mary
+            $ NonEmptyCons EraSummary
+                { eraStart = Bound
+                    { boundTime = RelativeTime 108432000
+                    , boundSlot = 23068800
+                    , boundEpoch = Node.EpochNo 251
+                    }
+                , eraEnd = EraEnd Bound
+                    { boundTime = RelativeTime 125280000
+                    , boundSlot = 39916800
+                    , boundEpoch = Node.EpochNo 290
+                    }
+                , eraParams = EraParams
+                    { eraEpochSize = EpochSize 432000
+                    , eraSlotLength = mkSlotLength 1
+                    , eraSafeZone = StandardSafeZone 129600
+                    }
+                }
+            -- Alonzo
+            $ NonEmptyOne EraSummary
+                { eraStart = Bound
+                    { boundTime = RelativeTime 125280000
+                    , boundSlot = 39916800
+                    , boundEpoch = Node.EpochNo 290
+                    }
+                , eraEnd = EraUnbounded
+                , eraParams = EraParams
+                    { eraEpochSize = EpochSize 432000
+                    , eraSlotLength = mkSlotLength 1
+                    , eraSafeZone = StandardSafeZone 129600
+                    }
+                }
+            }
+    Testnet _ -> error
+        "In light-mode time interpreter is only available for the \
+        \mainnet (interpreter uses a hard-coded history of hard forks). \
+        \It doesn't seem viable to hardcode it for other networks yet."
 
 {- Epoch-to-Era translation is not available in the Blockfrost API.
 
